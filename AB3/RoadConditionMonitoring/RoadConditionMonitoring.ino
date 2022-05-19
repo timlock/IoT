@@ -1,64 +1,224 @@
 #include <M5Stack.h>
 #include <TinyGPS++.h>
-//#include "utility/MPU9250.h"
+#include "utility/MPU6886.h"
+#include <InfluxDbCloud.h>
+#include <InfluxDbClient.h>
+#include <WiFi.h>
 
 using namespace std;
 
-String createTimeStamp();
-
 TinyGPSPlus gps;
 HardwareSerial serialStream(2);
-//MPU9250 IMU;
+MPU6886 mpu;
+char* blankLine = "                    ";
+char* trennlinie = "-----------------------------------------------------";
+
+struct PositionStamp {
+  TinyGPSTime time;
+  volatile double lattitude;
+  volatile double longitude;
+};
+
+
+struct PositionStamp stamp;
+volatile bool positionSet = false;
+
+char * ssid = "DESKTOP-RNGNR2Q 0447";
+char * password = "k3Q491*1";
+char * url = "https://eu-central-1-1.aws.cloud2.influxdata.com";
+char * organisation = "hsos";
+char * bucket = "iot-bucket";
+char * token = "FESIyzQ8punR1imo7K6NvofJQ8q5Gy6fDOWzC8UThTNYCoGHCHKxkGNplFT1vXgAFHAK9a1-9f5_7A23rhnO4g==";
+char * measurement = "SchluchLock";
+
+InfluxDBClient  influxClient(url, organisation, bucket, token, InfluxDbCloud2CACert);
+
+Point sensor(measurement);
+bool influxConnected = false;
+
+int dots = 0;
+
+unsigned long lastConnectTime;
 
 void setup() {
   M5.begin();
   M5.Power.begin();
   serialStream.begin(9600);
-
   Wire.begin();
-  //IMU.initMPU9250(); // this line must be after Wire.begin()
-  M5.Lcd.println("Road Condition Monitoring\n");
+  mpu.Init();
+  attachInterrupt(GPIO_NUM_38, updatePosStamp, HIGH);
+  WiFi.begin(ssid, password);
+  lastConnectTime = millis();
 }
 
 void loop() {
-
-  M5.Lcd.setCursor(0, 20);
-    uint32_t satelliteCount = gps.satellites.value();
-    int32_t hdopValue = gps.hdop.value();
-    double lattitude = gps.location.lat();
-    double longitude = gps.location.lng();
-    uint8_t days = gps.date.day();
-    uint8_t months = gps.date.month();
-    uint16_t years = gps.date.year();
-    String timeStamp = createTimeStamp();
-    M5.Lcd.println("Sats|HDOP|Latitude  |Longitude  |Date     |Time\n");
-    M5.Lcd.printf("%u   |%d|%f  |%f   |%u/%u/%u|%s\n\n",satelliteCount, hdopValue, lattitude, longitude, days, months, years, timeStamp.c_str());
-
-    M5.Lcd.println("x-Acceleration y-Acceleration z-Acceleration");
-  if(serialStream.available()){
-   // M5.Lcd.clear(BLACK);
+  sensor.clearFields();
+  M5.Lcd.setCursor(0, 0);
+  M5.Lcd.println("Road Condition Monitoring\n");
+  printWiFiStatus();
+  printInfluxStatus();
+  M5.Lcd.println(trennlinie);
+  printeTimeDate();
+  M5.Lcd.println(trennlinie);
+  printGps();
+  M5.Lcd.println(trennlinie);
+  printAccel();
+  M5.Lcd.println(trennlinie);
+  if (positionSet) {
+    printPosStamp();
+    M5.Lcd.println(trennlinie);
   }
-    while(serialStream.available()>0){
-      char c = serialStream.read();
-      if(c =='$'){
-        Serial.printf("\n");
-      }
-      gps.encode(c);
-      Serial.printf("%s",&c);
+  if (influxConnected) {
+    Serial.println(influxClient.pointToLineProtocol(sensor));
+    if (!influxClient.writePoint(sensor)) {
+      Serial.print("InfluxDB write failed: ");
+      Serial.println(influxClient.getLastErrorMessage());
     }
-    //delay(1000);
+  }
+  smartDelay(1000);
+
 }
 
-String createTimeStamp(){
-    String timeStamp = "";
-    uint8_t hours = (gps.time.hour() + 2) % 24;
-    uint8_t minutes = gps.time.minute();
-    uint8_t seconds = gps.time.second();
-    //if(hours < 10) timeStamp += "0";
-    timeStamp += String(hours) + ":";
-    //if(minutes < 10) timeStamp += "0";
-    timeStamp += String(minutes) + ":";
-    //if(seconds < 10) timeStamp += "0";
-    timeStamp += String(seconds);
-    return timeStamp;
+void printGps() {
+  int updated = gps.location.isUpdated();
+  int valid = gps.location.isValid();
+  M5.Lcd.printf("Location updated (%d) valid (%d)\n", updated, valid);
+  uint32_t satelliteCount = gps.satellites.value();
+  M5.Lcd.printf("Sats: %u%s\n", satelliteCount, blankLine);
+  int32_t hdopValue = gps.hdop.value();
+  M5.Lcd.printf("HDOP: %d%s\n", hdopValue, blankLine);
+  double lattitude = 0;
+  double longitude = 0;
+  if (updated && valid) {
+    lattitude = gps.location.lat();
+    longitude = gps.location.lng();
+    if (influxConnected) {
+      sensor.addField("lattitude", gps.location.lat());
+      sensor.addField("longitude", gps.location.lng());
+    }
+  }
+  M5.Lcd.printf("Lattitude: %f%s\nLongitude: %f%s\n", lattitude, blankLine, longitude, blankLine);
+}
+
+void printeTimeDate() {
+  uint8_t days = gps.date.day();
+  uint8_t months = gps.date.month();
+  uint16_t years = gps.date.year();
+  M5.Lcd.printf("Date: %u/%u/%u%s\n", days, months, years, blankLine);
+  String timeStamp = "";
+  uint8_t hours = (gps.time.hour() + 2) % 24;
+  uint8_t minutes = gps.time.minute();
+  uint8_t seconds = gps.time.second();
+  timeStamp += String(hours) + ":";
+  timeStamp += String(minutes) + ":";
+  timeStamp += String(seconds);
+  M5.Lcd.printf("Time: %s%s\n", timeStamp.c_str(), blankLine);
+}
+
+
+void printAccel() {
+  float accX;
+  float accY;
+  float accZ;
+  mpu.getAccelData(&accX, &accY, &accZ);
+  if (influxConnected) {
+    sensor.addField("X-acceleration", accX);
+    sensor.addField("Y-acceleration", accY);
+    sensor.addField("Z-acceleration", accZ);
+  }
+  M5.Lcd.printf("X-acceleration: %5.2f%s\n", accX, blankLine);
+  M5.Lcd.printf("Y-acceleration: %5.2f%s\n", accY, blankLine);
+  M5.Lcd.printf("Z-acceleration: %5.2f%s\n", accZ, blankLine);
+}
+
+
+void updatePosStamp() {
+  if (gps.location.isValid()) {
+    stamp.time = gps.time;
+    stamp.lattitude = gps.location.lat();
+    stamp.longitude = gps.location.lng();
+    positionSet = true;
+  } else {
+    Serial.println("Kann keinen Positions Stempel setzen, die gelesen Koordinaten sind ungültig");
+  }
+}
+
+String passedTimeSince(  TinyGPSTime time) {
+  String passedTime = String(gps.time.hour() - time.hour());
+  passedTime += (":");
+  passedTime += (gps.time.minute() - time.minute());
+  passedTime += (":");
+  passedTime += (gps.time.second() - time.second());
+  return passedTime;
+}
+
+void printPosStamp() {
+  M5.Lcd.printf("Startposition:%s\nLattitude: %f%s\nLongitude: %f%s\n", blankLine, stamp.lattitude, blankLine, stamp.longitude, blankLine);
+  String timePassed = passedTimeSince(stamp.time);
+  M5.Lcd.printf("Dauer: %s%s\n", timePassed.c_str(), blankLine);
+  unsigned long distance = TinyGPSPlus::distanceBetween(stamp.lattitude, stamp.longitude, gps.location.lat(), gps.location.lng());
+  M5.Lcd.printf("Distanz zum Start: %d%s\n", distance, blankLine);
+}
+
+void printWiFiStatus() {
+  bool wifiStatus = WiFi.status() == WL_CONNECTED;
+  M5.Lcd.printf("WiFi Status: (%d)", wifiStatus);
+  unsigned long currentTime = millis();
+  if (!wifiStatus && (currentTime - lastConnectTime >= 10000)) { // Versucht alle 10 Sekunden eine Verbinung aufzubauen
+    Serial.println("WiFi Verbindung verloren");
+    WiFi.reconnect();
+    int dots = 0;
+    lastConnectTime = currentTime;
+  }
+  if (!wifiStatus ) {
+    influxConnected = false;
+    if (dots == 3) {
+      dots = 0;
+    }
+    else {
+      for (int i = 0; i <= dots; i++) {
+        M5.Lcd.print(".");
+      }
+      dots++;
+    }
+  }
+  dots = 0;
+  M5.Lcd.print("     ");
+  M5.Lcd.println();
+}
+
+void printInfluxStatus() {
+  if (WiFi.status() == WL_CONNECTED && !influxConnected) {
+    configTzTime("CET-1CEST,M3.5.0,M10.5.0/3", "pool.ntp.org", "time.nis.gov");
+    if (influxClient.validateConnection()) {
+      Serial.print("Connected to InfluxDB: ");
+      Serial.println(influxClient.getServerUrl());
+      influxConnected = true;
+      sensor.addTag("SSID", WiFi.SSID());
+    } else {
+      Serial.print("InfluxDB connection failed: ");
+      Serial.println(influxClient.getLastErrorMessage());
+    }
+  }
+  M5.Lcd.printf("InfluxDB Status: (%d)\n", influxConnected);
+}
+
+
+void smartDelay(unsigned long ms)
+{
+  bool dataRead = false;
+  unsigned long start = millis();
+  do
+  {
+    char c;
+    while (serialStream.available()) {
+      dataRead = true;
+      c = serialStream.read();
+      if (c == '$')
+        Serial.println();
+      Serial.print(c);
+      gps.encode(c);
+    }
+  } while (millis() - start < ms);
+  M5.Lcd.printf("Lese GPS-Daten (%d)", dataRead);
 }
