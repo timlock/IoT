@@ -54,7 +54,7 @@ void loop() {
     if (!clockDrawn)
       drawAnalogClock();
     int hours, minutes, seconds;
-    scanf(timeStamp.c_str(), "%d:%d:%d", hours, minutes, seconds);
+    sscanf(timeStamp.c_str(), "%d:%d:%d", &hours, &minutes, &seconds);
     drawTimeHands(hours, minutes, seconds);
   } else {
     if (clockDrawn) {
@@ -63,7 +63,20 @@ void loop() {
     }
     drawDigital(timeStamp);
   }
-  delay(1000);
+
+  smartDelay(1000);
+}
+
+void smartDelay(unsigned long ms)
+{
+  bool dataRead = false;
+  unsigned long start = millis();
+  do
+  {
+    while (!timeClient.update()) {
+      timeClient.forceUpdate();
+    }
+  } while (millis() - start < ms);
 }
 
 void setAnalog() {
@@ -93,6 +106,7 @@ void drawAnalogClock() {
 }
 
 void drawTimeHands(int hours, int minutes, int seconds) {
+  Serial.printf("%d %d %d\n", hours, minutes, seconds);
   uint16_t h_sx = 120, h_sy = 120;
   uint16_t h_mx = 120, h_my = 120;
   uint16_t h_hx = 120, h_hy = 120;
@@ -108,17 +122,14 @@ void drawTimeHands(int hours, int minutes, int seconds) {
   float sec_y = sin((sec_deg - 90) * 0.0174532925);
   int white = 0xFFFFFF;
   int red = 0xFF0000;
-  if (seconds == 0) {
-    M5.Lcd.drawLine(h_hx, h_hy, X_OFFSET, Y_OFFSET, white);
-    h_hx = hou_x * H_POINTER_LENGTH + X_OFFSET;
-    h_hy = hou_y * H_POINTER_LENGTH + Y_OFFSET;
-    M5.Lcd.drawLine(h_mx, h_my, X_OFFSET, Y_OFFSET, white);
-    h_mx = min_x * M_POINTER_LENGTH + X_OFFSET;
-    h_my = min_y * M_POINTER_LENGTH + Y_OFFSET;
-  }
-  M5.Lcd.drawLine(h_sx, h_sy, X_OFFSET, Y_OFFSET, red);
+  h_hx = hou_x * H_POINTER_LENGTH + X_OFFSET;
+  h_hy = hou_y * H_POINTER_LENGTH + Y_OFFSET;
+  h_mx = min_x * M_POINTER_LENGTH + X_OFFSET;
+  h_my = min_y * M_POINTER_LENGTH + Y_OFFSET;
   h_sx = sec_x * S_POINTER_LENGTH + X_OFFSET;
   h_sy = sec_y * S_POINTER_LENGTH + Y_OFFSET;
+  M5.Lcd.fillCircle(X_OFFSET, Y_OFFSET, R_INNER, 0x5AEB);
+
   M5.Lcd.drawLine(h_hx, h_hy, X_OFFSET, Y_OFFSET, white);
   M5.Lcd.drawLine(h_mx, h_my, X_OFFSET, Y_OFFSET, white);
   M5.Lcd.drawLine(h_sx, h_sy, X_OFFSET, Y_OFFSET, red);
