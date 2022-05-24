@@ -5,8 +5,8 @@
 
 using namespace std;
 
-const char* ssid = "DESKTOP-RNGNR2Q 0447";
-const char* password = "k3Q491*1";
+const char* ssid = "WIN-41A168KIKJ7 9759";
+const char* password = "18Uj93;0";
 
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);

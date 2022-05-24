@@ -23,8 +23,8 @@ struct PositionStamp {
 struct PositionStamp stamp;
 volatile bool positionSet = false;
 
-char * ssid = "DESKTOP-RNGNR2Q 0447";
-char * password = "k3Q491*1";
+char * ssid = "WIN-41A168KIKJ7 9759";
+char * password = "18Uj93;0";
 char * url = "https://eu-central-1-1.aws.cloud2.influxdata.com";
 char * organisation = "hsos";
 char * bucket = "iot-bucket";
@@ -49,12 +49,15 @@ void setup() {
   attachInterrupt(GPIO_NUM_38, updatePosStamp, HIGH);
   WiFi.begin(ssid, password);
   lastConnectTime = millis();
+  //sensor.addTag("SSID", WiFi.SSID());
 }
 
 void loop() {
   sensor.clearFields();
   M5.Lcd.setCursor(0, 0);
   M5.Lcd.println("Road Condition Monitoring\n");
+  int battery = M5.Power.getBatteryLevel();
+  M5.Lcd.printf("Batterry: %d\n",battery);
   printWiFiStatus();
   printInfluxStatus();
   M5.Lcd.println(trennlinie);
@@ -182,9 +185,7 @@ void printWiFiStatus() {
       dots++;
     }
   }
-  dots = 0;
-  M5.Lcd.print("     ");
-  M5.Lcd.println();
+  M5.Lcd.print("     \n"); 
 }
 
 void printInfluxStatus() {
@@ -194,7 +195,6 @@ void printInfluxStatus() {
       Serial.print("Connected to InfluxDB: ");
       Serial.println(influxClient.getServerUrl());
       influxConnected = true;
-      sensor.addTag("SSID", WiFi.SSID());
     } else {
       Serial.print("InfluxDB connection failed: ");
       Serial.println(influxClient.getLastErrorMessage());
