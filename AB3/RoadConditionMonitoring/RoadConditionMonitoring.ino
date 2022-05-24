@@ -14,7 +14,9 @@ char* blankLine = "                    ";
 char* trennlinie = "-----------------------------------------------------";
 
 struct PositionStamp {
-  TinyGPSTime time;
+  volatile uint8_t hours;
+  volatile uint8_t minutes;
+  volatile uint8_t seconds;
   volatile double lattitude;
   volatile double longitude;
 };
@@ -23,8 +25,8 @@ struct PositionStamp {
 struct PositionStamp stamp;
 volatile bool positionSet = false;
 
-char * ssid = "WIN-41A168KIKJ7 9759";
-char * password = "18Uj93;0";
+char * ssid = "hotspotTim";
+char * password = "k3Q491*1";
 char * url = "https://eu-central-1-1.aws.cloud2.influxdata.com";
 char * organisation = "hsos";
 char * bucket = "iot-bucket";
@@ -57,7 +59,7 @@ void loop() {
   M5.Lcd.setCursor(0, 0);
   M5.Lcd.println("Road Condition Monitoring\n");
   int battery = M5.Power.getBatteryLevel();
-  M5.Lcd.printf("Batterry: %d\n",battery);
+  M5.Lcd.printf("Batterry: %d%s\n", battery, blankLine);
   printWiFiStatus();
   printInfluxStatus();
   M5.Lcd.println(trennlinie);
@@ -137,7 +139,9 @@ void printAccel() {
 
 void updatePosStamp() {
   if (gps.location.isValid()) {
-    stamp.time = gps.time;
+    stamp.hours = gps.time.hour();
+    stamp.minutes = gps.time.minute();
+    stamp.seconds = gps.time.second();
     stamp.lattitude = gps.location.lat();
     stamp.longitude = gps.location.lng();
     positionSet = true;
@@ -146,18 +150,18 @@ void updatePosStamp() {
   }
 }
 
-String passedTimeSince(  TinyGPSTime time) {
-  String passedTime = String(gps.time.hour() - time.hour());
+String passedTimeSince() {
+  String passedTime = String(gps.time.hour() - stamp.hours);
   passedTime += (":");
-  passedTime += (gps.time.minute() - time.minute());
+  passedTime += (gps.time.minute() - stamp.minutes);
   passedTime += (":");
-  passedTime += (gps.time.second() - time.second());
+  passedTime += (gps.time.second() - stamp.seconds);
   return passedTime;
 }
 
 void printPosStamp() {
   M5.Lcd.printf("Startposition:%s\nLattitude: %f%s\nLongitude: %f%s\n", blankLine, stamp.lattitude, blankLine, stamp.longitude, blankLine);
-  String timePassed = passedTimeSince(stamp.time);
+  String timePassed = passedTimeSince();
   M5.Lcd.printf("Dauer: %s%s\n", timePassed.c_str(), blankLine);
   unsigned long distance = TinyGPSPlus::distanceBetween(stamp.lattitude, stamp.longitude, gps.location.lat(), gps.location.lng());
   M5.Lcd.printf("Distanz zum Start: %d%s\n", distance, blankLine);
@@ -185,7 +189,7 @@ void printWiFiStatus() {
       dots++;
     }
   }
-  M5.Lcd.print("     \n"); 
+  M5.Lcd.print("     \n");
 }
 
 void printInfluxStatus() {
