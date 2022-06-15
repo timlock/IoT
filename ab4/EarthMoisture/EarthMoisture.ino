@@ -11,14 +11,15 @@
 #define MAX_MOISTURE 4095
 #define MIN_MOISTURE 1450
 
-int pin         =  15;
-int numPixels   = 10;
+int pin = 15;
+int numPixels = 10;
 int pixelFormat = NEO_GRB + NEO_KHZ800;
 Adafruit_NeoPixel pixels(numPixels, pin, pixelFormat);
 
 const char* mqttServer = "broker.mqttdashboard.com";
-const char* mqttId = "clientId-IGXKJtWCaY";
-const char* mqttTopic = "extremeLit";
+const char* mqttId = "clientId-schluchLock";
+const char* mqttTopicPublish = "schluchLock/eins";
+const char* mqttTopicSubscribe = "schluchLock/zwei";
 
 const char* apSsid = "MoistureServer";
 const char* apPwd = "12341234";
@@ -27,34 +28,23 @@ char * hotspotSsid = "hotspot";
 char * hotspotPwd = "k3Q491*1";
 
 float moisture = 0.0f;
+String anotherMoisture = "";
 unsigned long lastConnectTime;
-//
+
 IPAddress local_ip(192, 168, 1, 1);
 IPAddress gateway(192, 168, 1, 1);
 IPAddress subnet(255, 255, 255, 0);
-void callback(char* topic, byte* message, unsigned int length) {
-  Serial.print("Message arrived [");
-  Serial.print(topic);
-  Serial.print("] message:");
-  for (int i = 0; i < length; i++) {
-    Serial.print((char)message[i]);
-  }
-  Serial.println();
-}
+void callback(char* topic, byte* message, unsigned int length);
 
 WebServer server(80);
 WiFiClient wClient;
-PubSubClient client(wClient);
+PubSubClient publishClient(wClient);
 
 void setup() {
   M5.begin();
   M5.Power.begin();
   WiFi.begin(hotspotSsid, hotspotPwd);
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print(WiFi.status());
-    delay(1000);
-  }
-  M5.lcd.setTextSize(2);
+  M5.Lcd.setTextSize(2);
   M5.Lcd.println("Earth Moisture");
   pinMode(26, INPUT);
   pixels.begin();
@@ -66,8 +56,8 @@ void setup() {
   Serial.println("' to connect");
   server.on("/", handle_OnConnect);
   server.begin();
-  client.setServer(mqttServer, 1883);
-  client.setCallback(callback);
+  publishClient.setServer(mqttServer, 1883);
+  publishClient.setCallback(callback);
   lastConnectTime = millis();
 }
 
@@ -76,29 +66,60 @@ void loop() {
   pixels.clear();
   M5.update();
   M5.Lcd.setCursor(0, 80);
+  printWiFiStatus();
   moisture = printMoistureLevel();
   int battery = printBattery();
   activateLeds(moisture, battery);
-  printWiFiStatus();
   publishToMqtt();
-  delay(1000);
+  smartDelay(1000);
 }
 
-void publishToMqtt() {
-  if (client.state() == MQTT_CONNECTED) {
-    client.loop();
-    client.publish(mqttTopic, String(moisture).c_str());
+void printWiFiStatus() {
+  static int dots = 0;
+  bool wifiStatus = WiFi.status() == WL_CONNECTED;
+  M5.Lcd.printf("WiFi Status: (%d)", wifiStatus);
+  unsigned long currentTime = millis();
+  if (!wifiStatus && (currentTime - lastConnectTime >= 10000)) { // Versucht alle 10 Sekunden eine Verbinung aufzubauen
+    Serial.println("WiFi Verbindung verloren");
+    WiFi.reconnect();
+    int dots = 0;
+    lastConnectTime = currentTime;
   }
+  if (!wifiStatus ) {
+    if (dots == 3) {
+      dots = 0;
+      M5.Lcd.print("    ");
+    }
+    else {
+      for (int i = 0; i <= dots; i++) {
+        M5.Lcd.print(".");
+      }
+      dots++;
+    }
+  }
+  else {
+    M5.Lcd.print("    ");
+    dots = 0;
+  }
+  M5.Lcd.println();
 }
-
 
 void smartDelay(unsigned long ms)
 {
   unsigned long start = millis();
   do
   {
-    server.handleClient();
   } while (millis() - start < ms);
+}
+
+void callback(char* topic, byte* message, unsigned int length) {
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] message:");
+  for (int i = 0; i < length; i++) {
+    anotherMoisture += (char)message[i];
+  }
+  Serial.println(anotherMoisture);
 }
 
 
@@ -106,7 +127,8 @@ float printMoistureLevel() {
   int analog = analogRead(36);
   float newMoisture = 100 - ((analog - MIN_MOISTURE) * 100.f) / (MAX_MOISTURE - MIN_MOISTURE);
   //Serial.printf("Analog: %d relativer Wert: %f\n", analog, newMoisture);
-  M5.Lcd.printf("Moisutre level: %3.2f%%  \n", newMoisture);
+  M5.Lcd.printf("Moisutre: %3.2f%%  \n", newMoisture);
+  M5.Lcd.printf("Another moisture: %s%%\n", anotherMoisture.c_str());
   return newMoisture;
 }
 
@@ -139,51 +161,38 @@ void activateLeds(float moisture, int battery) {
 }
 void handle_OnConnect() {
   Serial.println("Seitenaufruf von Client");
-  String ptr = "<!DOCTYPE html>";
-  ptr += "<html>";
-  ptr += "<head><title>Hello moistureServer</title>";
-  ptr += "<meta http-equiv='refresh' content='10'></head>";
-  ptr += "<body><p>Relativer Anteil in Prozent der Bodenfeuchtigkeit: ";
-  ptr += String(moisture);
-  ptr += "</p></body>";
-  ptr += "</html>";
-  server.send(200, "text/html", ptr);
+  String response = "<!DOCTYPE html>";
+  response += "<html>";
+  response += "<head><title>Hello moistureServer</title>";
+  response += "<meta http-equiv='refresh' content='10'></head>";
+  response += "<body><p>Relativer Anteil in Prozent der Bodenfeuchtigkeit: ";
+  response += String(moisture);
+  response += "%</p><p>Messwerte eines anderen Sensors";
+  response += anotherMoisture;
+  response += "</p></body>";
+  response += "</html>";
+  server.send(200, "text/html", response);
 }
 
-void printWiFiStatus() {
-  static int dots = 0;
-  bool wifiStatus = WiFi.status() == WL_CONNECTED;
-  M5.Lcd.printf("WiFi Status: (%d)", wifiStatus);
-  unsigned long currentTime = millis();
-  if (!wifiStatus && (currentTime - lastConnectTime >= 10000)) { // Versucht alle 10 Sekunden eine Verbinung aufzubauen
-    Serial.println("WiFi Verbindung verloren");
-    WiFi.reconnect();
-    int dots = 0;
-    lastConnectTime = currentTime;
-  }
-  if (!wifiStatus ) {
-    if (dots == 3) {
-      dots = 0;
-    }
-    else {
-      for (int i = 0; i <= dots; i++) {
-        M5.Lcd.print(".");
-      }
-      dots++;
-    }
-  }
-  if (wifiStatus) {
-    if (!client.connected()) {
-      Serial.println(client.state());
+void publishToMqtt() {
+  if (WiFi.status()) {
+    if (!publishClient.connected()) {
+      Serial.println(publishClient.state());
       Serial.println("Nicht verbunden");
       delay(1000);
       //Aufbauen einer Verbindung
-      if (client.connect(mqttId)) {
+      Serial.println("Verbinde mit MQTT Server");
+      if (publishClient.connect(mqttId)) {
         //Subscribe
         Serial.println("Verbunden");
-        client.subscribe(mqttTopic);
+        publishClient.subscribe(mqttTopicSubscribe);
       }
 
     }
+    if (publishClient.state() == MQTT_CONNECTED) {
+      publishClient.loop();
+      publishClient.publish(mqttTopicPublish, String(moisture).c_str());
+    }
   }
+
 }
