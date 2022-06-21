@@ -88,7 +88,7 @@ void printWiFiStatus() {
   if (!wifiStatus ) {
     if (dots == 3) {
       dots = 0;
-      M5.Lcd.print("    ");
+      M5.Lcd.print("     ");
     }
     else {
       for (int i = 0; i <= dots; i++) {
@@ -98,7 +98,7 @@ void printWiFiStatus() {
     }
   }
   else {
-    M5.Lcd.print("    ");
+    M5.Lcd.print("   ");
     dots = 0;
   }
   M5.Lcd.println();
@@ -116,8 +116,13 @@ void callback(char* topic, byte* message, unsigned int length) {
   Serial.print("Message arrived [");
   Serial.print(topic);
   Serial.print("] message:");
+  anotherMoisture = "";
   for (int i = 0; i < length; i++) {
     anotherMoisture += (char)message[i];
+  }
+  anotherMoisture +="%";
+  for(int i = length; i < 6; i++){
+    anotherMoisture += " ";
   }
   Serial.println(anotherMoisture);
 }
@@ -128,7 +133,7 @@ float printMoistureLevel() {
   float newMoisture = 100 - ((analog - MIN_MOISTURE) * 100.f) / (MAX_MOISTURE - MIN_MOISTURE);
   //Serial.printf("Analog: %d relativer Wert: %f\n", analog, newMoisture);
   M5.Lcd.printf("Moisutre: %3.2f%%  \n", newMoisture);
-  M5.Lcd.printf("Another moisture: %s%%\n", anotherMoisture.c_str());
+  M5.Lcd.printf("Another moisture: %s\n", anotherMoisture.c_str());
   return newMoisture;
 }
 
@@ -175,7 +180,7 @@ void handle_OnConnect() {
 }
 
 void publishToMqtt() {
-  if (WiFi.status()) {
+  if (WiFi.status() == WL_CONNECTED) {
     if (!publishClient.connected()) {
       Serial.println(publishClient.state());
       Serial.println("Nicht verbunden");
